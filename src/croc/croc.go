@@ -129,6 +129,9 @@ type Options struct {
 	DisableClipboard  bool
 	ExtendedClipboard bool
 	Transport         TransportMode `json:",omitempty"`
+	// NoHashCache disables reuse of digests remembered from earlier sends of
+	// unchanged files.
+	NoHashCache bool `json:",omitempty"`
 }
 
 // TransportMode controls how a sender selects the file-data connection after
@@ -243,6 +246,8 @@ type Client struct {
 	peerPerFileCompression     bool
 	peerInlineMetadata         bool
 	peerProgressiveHash        bool
+	hashCacheHits              atomic.Int64
+	hashCacheHitBytes          atomic.Int64
 	peerChunkedFileInfo        bool
 	peerStagedTransport        bool
 	peerImplicitTailcatReady   bool
@@ -1335,6 +1340,11 @@ func (c *Client) sendCollectFiles(filesInfo []FileInfo) (err error) {
 		fmt.Fprintf(output, "\rSending %d files (%s)", i, utils.ByteCountDecimal(totalFilesSize))
 	}
 	log.Debugf("longestFilename: %+v", c.longestFilename)
+	if hits := c.hashCacheHits.Load(); hits > 0 {
+		fmt.Fprintf(os.Stderr, "\r                                 ")
+		output, _ := termui.Output(os.Stderr)
+		fmt.Fprintf(output, "\rUsing cached hashes for %d unchanged files (%s)\n", hits, utils.ByteCountDecimal(c.hashCacheHitBytes.Load()))
+	}
 	fname := fmt.Sprintf("%d files", len(c.FilesToTransfer))
 	folderName := fmt.Sprintf("%d folders", c.TotalNumberFolders)
 	displayName := ""

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/schollz/croc/v11/src/hashcache"
 	log "github.com/schollz/croc/v11/src/logger"
 	"github.com/schollz/croc/v11/src/message"
 )
@@ -42,6 +43,13 @@ func sourceInfoMatches(expected FileInfo, before, after os.FileInfo) bool {
 		os.SameFile(before, after)
 }
 
+// hashCacheEnabled reports whether fileInfo's digest may be read from or
+// written to the persistent sender hash cache.
+func (c *Client) hashCacheEnabled(fileInfo FileInfo) bool {
+	return !c.Options.NoHashCache && !c.Options.SendingText && !fileInfo.TempFile &&
+		fileInfo.Mode.IsRegular() && fileInfo.Size > 0
+}
+
 func (c *Client) prepareFile(index int, algorithm string, scratch *filePreparationScratch) error {
 	if index < 0 || index >= len(c.FilesToTransfer) {
 		return fmt.Errorf("invalid file preparation index %d", index)
@@ -53,7 +61,15 @@ func (c *Client) prepareFile(index int, algorithm string, scratch *filePreparati
 		return err
 	}
 
-	if !c.Options.NoCompress && fileInfo.Mode.IsRegular() && fileInfo.Size > 0 {
+	useCache := c.hashCacheEnabled(fileInfo)
+	var cached *hashcache.Entry
+	if useCache {
+		cached, _ = hashcache.Lookup(fullPath, algorithm, before)
+	}
+	wantCompress := !c.Options.NoCompress && fileInfo.Mode.IsRegular() && fileInfo.Size > 0
+	if wantCompress && cached != nil && cached.HasCompress {
+		c.FilesToTransfer[index].IsCompressed = cached.IsCompressed
+	} else if wantCompress {
 		if scratch.compressionSample == nil {
 			scratch.compressionSample = make([]byte, compressionSampleSize)
 		}
@@ -63,8 +79,13 @@ func (c *Client) prepareFile(index int, algorithm string, scratch *filePreparati
 			scratch.compressionOutput,
 		)
 	}
-	hash, err := c.stop.hash(fullPath, algorithm, fileInfo.Size > 1e7)
-	if err != nil {
+	var hash []byte
+	if cached != nil {
+		hash = cached.Hash
+		c.hashCacheHits.Add(1)
+		c.hashCacheHitBytes.Add(fileInfo.Size)
+		log.Debugf("using cached %s hash for %s", algorithm, fullPath)
+	} else if hash, err = c.stop.hash(fullPath, algorithm, fileInfo.Size > 1e7); err != nil {
 		return err
 	}
 	after, err := os.Lstat(fullPath)
@@ -73,6 +94,9 @@ func (c *Client) prepareFile(index int, algorithm string, scratch *filePreparati
 	}
 	if !sourceInfoMatches(fileInfo, before, after) {
 		return fmt.Errorf("source changed while preparing %s", fullPath)
+	}
+	if useCache && cached == nil {
+		hashcache.Store(fullPath, algorithm, after, hash, c.FilesToTransfer[index].IsCompressed, wantCompress)
 	}
 	c.FilesToTransfer[index].Hash = hash
 	c.FilesToTransfer[index].Prepared = true

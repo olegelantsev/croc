@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/schollz/croc/v11/src/hashcache"
 	"github.com/schollz/croc/v11/src/message"
 	"github.com/schollz/croc/v11/src/utils"
 )
@@ -123,12 +124,25 @@ func (c *Client) processExactHashRequest(m message.Message) error {
 		return err
 	}
 	filename := sourceFilePath(c.FilesToTransfer[index])
-	hash, err := c.stop.hash(filename, defaultHashAlgorithm, c.FilesToTransfer[index].Size > 1e7)
-	if err != nil {
-		return err
+	useCache := c.hashCacheEnabled(c.FilesToTransfer[index])
+	var cached *hashcache.Entry
+	if useCache {
+		cached, _ = hashcache.Lookup(filename, defaultHashAlgorithm, c.sourceSnapshots[index])
+	}
+	var hash []byte
+	if cached != nil {
+		hash = cached.Hash
+	} else {
+		var err error
+		if hash, err = c.stop.hash(filename, defaultHashAlgorithm, c.FilesToTransfer[index].Size > 1e7); err != nil {
+			return err
+		}
 	}
 	if err := c.validateSourceUnchanged(index); err != nil {
 		return err
+	}
+	if useCache && cached == nil {
+		hashcache.Store(filename, defaultHashAlgorithm, c.sourceSnapshots[index], hash, false, false)
 	}
 	return message.Send(c.connection(0), c.Key, message.Message{
 		Type:  message.TypeExactHashResult,

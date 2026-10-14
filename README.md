@@ -471,6 +471,12 @@ For faster hashing, use the `imohash` algorithm:
 croc send --hash imohash SOMEFILE
 ```
 
+When you send the same files again, for example after an interrupted transfer, croc reuses the hashes it computed earlier for files whose size, modification time and mode are unchanged. On most Unix systems it also checks the file's device, inode and change time. To always rehash:
+
+```bash
+croc send --no-hash-cache SOMEFILE
+```
+
 #### Clipboard Options
 
 By default, the code phrase is copied to your clipboard. To disable this:

@@ -96,6 +96,7 @@ func newApp() *cli.App {
 				&cli.StringFlag{Name: "code", Aliases: []string{"c"}, Usage: "codephrase used to connect to relay (at least 6 characters)"},
 				&cli.StringFlag{Name: "transport", Value: string(croc.TransportAuto), Usage: "sender file data transport (auto, derp, relay)"},
 				&cli.StringFlag{Name: "hash", Value: "xxhash", Usage: "hash algorithm (xxhash, imohash, md5, highway)"},
+				&cli.BoolFlag{Name: "no-hash-cache", Usage: "always rehash files instead of reusing hashes of unchanged files from earlier sends", EnvVars: []string{"CROC_NO_HASH_CACHE"}},
 				&cli.StringFlag{Name: "text", Aliases: []string{"t"}, Usage: "send some text"},
 				&cli.BoolFlag{Name: "no-local", Usage: "disable local relay when sending"},
 				&cli.BoolFlag{Name: "no-multi", Usage: "disable multiplexing"},
@@ -553,6 +554,9 @@ func applyRememberedSendOptions(c *cli.Context, options *croc.Options, remembere
 	if !c.IsSet("hash") {
 		options.HashAlgorithm = remembered.HashAlgorithm
 	}
+	if !c.IsSet("no-hash-cache") {
+		options.NoHashCache = remembered.NoHashCache
+	}
 	if !c.IsSet("git") {
 		options.GitIgnore = remembered.GitIgnore
 	}
@@ -678,6 +682,7 @@ func send(c *cli.Context) (err error) {
 		DisableClipboard:  c.Bool("disable-clipboard"),
 		ExtendedClipboard: c.Bool("extended-clipboard"),
 		Transport:         transport,
+		NoHashCache:       c.Bool("no-hash-cache"),
 	}
 	if crocOptions.RelayAddress != models.DEFAULT_RELAY {
 		crocOptions.RelayAddress6 = ""
