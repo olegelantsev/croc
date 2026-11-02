@@ -43,7 +43,13 @@ func (c *Client) preflightReceiveFile(index int) (receiveDecision, error) {
 	}
 	matches := false
 	if exists && file.Size > 0 && file.Symlink == "" && stat.Mode().IsRegular() && stat.Size() == file.Size {
-		hash, err := receiveFileHash(c.clientContext(), destination, c.Options.HashAlgorithm, !c.Options.SendingText)
+		// Hash the normalized path that Lstat found: senders may name files in
+		// NFD (macOS) while the receiver stores them in NFC.
+		hashPath, err := root.Path(destination)
+		if err != nil {
+			return receiveDecision{}, err
+		}
+		hash, err := receiveFileHash(c.clientContext(), hashPath, c.Options.HashAlgorithm, !c.Options.SendingText)
 		if err != nil {
 			return receiveDecision{}, fmt.Errorf("hash existing destination %q: %w", destination, err)
 		}
@@ -56,7 +62,7 @@ func (c *Client) preflightReceiveFile(index int) (receiveDecision, error) {
 			case pending:
 				return receiveDecision{pending: true}, nil
 			default:
-				if err := c.beginExactHash(index, destination); err != nil {
+				if err := c.beginExactHash(index, hashPath); err != nil {
 					return receiveDecision{}, err
 				}
 				return receiveDecision{pending: true}, nil

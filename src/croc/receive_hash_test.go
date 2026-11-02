@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/schollz/croc/v11/src/utils"
 )
 
 func TestReceiveHashAlgorithmAllowlist(t *testing.T) {
@@ -71,5 +74,43 @@ func TestExistingDestinationHashFailureIsFatal(t *testing.T) {
 	err := client.updateIfRecipientHasFileInfo()
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("updateIfRecipientHasFileInfo() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestExistingDestinationHashUsesNormalizedName(t *testing.T) {
+	t.Chdir(t.TempDir())
+	nfc, nfd := "й.mov", "й.mov"
+	data := []byte("data")
+	if err := os.WriteFile(nfc, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := utils.HashFile(nfc, defaultHashAlgorithm)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalHash := receiveFileHash
+	var hashed string
+	receiveFileHash = func(ctx context.Context, name, algorithm string, progress ...bool) ([]byte, error) {
+		hashed = name
+		return originalHash(ctx, name, algorithm, progress...)
+	}
+	t.Cleanup(func() { receiveFileHash = originalHash })
+
+	client := &Client{
+		Options:          Options{HashAlgorithm: defaultHashAlgorithm},
+		FilesToTransfer:  []FileInfo{{Name: nfd, FolderRemote: ".", Size: int64(len(data)), Hash: hash}},
+		FilesHasFinished: make(map[int]struct{}),
+	}
+	defer client.closeReceiveFilesystem()
+
+	if _, err := client.preflightReceiveFile(0); err != nil {
+		t.Fatalf("preflightReceiveFile() error = %v", err)
+	}
+	if filepath.Base(hashed) != nfc {
+		t.Fatalf("hashed %q, want normalized name %q", hashed, nfc)
+	}
+	if _, done := client.FilesHasFinished[0]; !done {
+		t.Fatal("matching NFC destination was not recognized for an NFD sender name")
 	}
 }

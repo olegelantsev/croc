@@ -36,6 +36,16 @@ func OpenRoot(name string) (*Root, error) {
 func (r *Root) Close() error { return r.root.Close() }
 func (r *Root) Name() string { return r.name }
 
+// Path returns the absolute native path that root operations use for name, for
+// APIs that cannot operate through os.Root.
+func (r *Root) Path(name string) (string, error) {
+	clean, err := native(name, false)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(r.name, clean), nil
+}
+
 func native(name string, allowRoot bool) (string, error) {
 	clean, err := Normalize(name, allowRoot)
 	if err != nil {
